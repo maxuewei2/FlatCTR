@@ -315,11 +315,11 @@ int main(int argc, char* argv[])
   options.add_option(group, "", "test", "testing file",
                      cxxopts::value<std::string>()->default_value("../dataset/test.txt"), "");
   options.add_option(group, "", "test_pred", "file to save predictions of testing file",
-                     cxxopts::value<std::string>()->default_value("../data_output/test_pred.txt"), "");
+                     cxxopts::value<std::string>()->default_value("../output/test_pred.txt"), "");
   options.add_option(group, "i", "load", "file to load model",
                      cxxopts::value<std::string>()->default_value(""), "");
   options.add_option(group, "o", "save", "file to save model",
-                     cxxopts::value<std::string>()->default_value("../data_output/model.txt"), "");
+                     cxxopts::value<std::string>()->default_value("../output/model.txt"), "");
   options.add_option(group, "", "w_lr", "learning_rate for linear part",
                      cxxopts::value<F>()->default_value("0.1"), "");
   options.add_option(group, "", "v_lr", "learning_rate for embedding part",
@@ -349,7 +349,7 @@ int main(int argc, char* argv[])
   try
   {
     auto args = options.parse(argc, argv);
-    if (argc == 1 || args.count("help"))
+    if (args.count("help"))
     {
       std::cout << options.help() << std::endl;
       exit(0);

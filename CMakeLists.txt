@@ -16,7 +16,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
 # Create a sources variable with a link to all cpp files to compile
 set(SOURCES
-        src/main.cpp
+        src/flatctr.cpp
 )
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/src/deps/cxxopts)
