@@ -1,0 +1,12 @@
+[submodule "src/deps/libcuckoo"]
+	path = src/deps/libcuckoo
+	url = https://github.com/efficient/libcuckoo.git
+[submodule "src/deps/spdlog"]
+	path = src/deps/spdlog
+	url = https://github.com/gabime/spdlog.git
+[submodule "src/deps/fast_float"]
+	path = src/deps/fast_float
+	url = https://github.com/fastfloat/fast_float.git
+[submodule "src/deps/cxxopts"]
+	path = src/deps/cxxopts
+	url = https://github.com/jarro2783/cxxopts
