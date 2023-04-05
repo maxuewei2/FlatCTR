@@ -16,7 +16,7 @@ make
 ## Usage
 1. Run `./fastctr -h` to display a list of all supported options.
 2. Run `./flatctr` to train on the sample dataset.
-3. For online training, use the `-i` option to load a trained model.
+3. For online training, use the `-i` option to load a trained model:
    `./flatctr -i ../output/model.txt`
 
 ### Data Format
