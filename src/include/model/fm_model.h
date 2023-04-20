@@ -110,7 +110,7 @@ void FM::learn(const std::vector<std::unique_ptr<Sample>>& sample_batch)
     uint32_t& y = sample->y;
     F         p = predict_prob(sample, true);
     F         t = (float)y - p;
-    bias_grad += t;
+    bias_grad += (t / size);
 
     for (size_t j = 0; j < N; j += 8)
     {
