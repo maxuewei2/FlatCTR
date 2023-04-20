@@ -26,7 +26,11 @@ class LR : public Base
 
   void learn(const std::vector<std::unique_ptr<Sample>>& sample_batch) override;
 
+  F predict_prob(const std::unique_ptr<Sample>& sample, bool training);
+
   F predict_prob(const std::unique_ptr<Sample>& sample) override;
+
+  void sgd(const F& bias_grad, const std::unordered_map<uint32_t, F>& grad_map);
 
   size_t load(const std::string& fname) override;
 
@@ -35,47 +39,61 @@ class LR : public Base
 
 LR::LR(F lr, F l2) : lr(lr), l2(l2) {}
 
+void LR::sgd(const F& bias_grad, const std::unordered_map<uint32_t, F>& grad_map)
+{
+  F w = 0;
+  for (auto& [idx, val] : grad_map)
+  {
+    weights.find(idx, w);
+    w += (lr * val);
+    weights.insert_or_assign(idx, w);
+  }
+
+  bias += (lr * bias_grad);
+}
+
 void LR::learn(const std::vector<std::unique_ptr<Sample>>& sample_batch)
 {
   static thread_local std::unordered_map<uint32_t, F> grad_map;
+  F w = 0;
 
-  F bias_grad = 0;
+  auto size      = (float)sample_batch.size();
+  F    bias_grad = 0;
   for (auto& sample : sample_batch)
   {
     uint32_t& y = sample->y;
-    F         p = predict_prob(sample);
+    F         p = predict_prob(sample, true);
     F         t = (float)y - p;
     for (auto& [i, xi] : *(sample->x))
     {
-      F w = 0;
       weights.find(i, w);
       if (grad_map.find(i) == grad_map.end())
         grad_map[i] = 0;
-      grad_map[i] += (t * xi - l2 * w);
+      grad_map[i] += (t * xi - l2 * w) / size;
     }
-    bias_grad += t;
+    bias_grad += t / size;
   }
-  auto size = (float)sample_batch.size();
-  {
-    for (auto& [idx, val] : grad_map)
-    {
-      F w = 0;
-      weights.find(idx, w);
-      w += (lr * val / size);
-      weights.insert_or_assign(idx, w);
-    }
-  }
-  bias += (lr * bias_grad / size);
+
+  sgd(bias_grad, grad_map);
   grad_map.clear();
 }
 
 F LR::predict_prob(const std::unique_ptr<Sample>& sample)
 {
-  F p = bias;
+  return predict_prob(sample, false);
+}
+
+F LR::predict_prob(const std::unique_ptr<Sample>& sample, bool training)
+{
+  F p = bias, w;
   for (auto& [i, xi] : *(sample->x))
   {
-    F w = 0;
-    weights.find(i, w);
+    if (!weights.find(i, w))
+    {
+      if (training)
+        weights.insert_or_assign(i, 0);
+      continue;
+    }
     p += (w * xi);
   }
   p = sigmoid(p);

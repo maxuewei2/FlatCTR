@@ -61,6 +61,8 @@ class FM : public Base
 
   F predict_prob(const std::unique_ptr<Sample>& sample) override;
 
+  void sgd(const F& bias_grad, const std::unordered_map<uint32_t, FM_weight>& grad_map);
+
   size_t load(const std::string& fname) override;
 
   int save(const std::string& fname) override;
@@ -74,11 +76,33 @@ FM::FM(size_t N, F w_lr, F v_lr, F w_l2, F v_l2, F init_stddev, long seed)
   gauss_distribution = std::normal_distribution<F>(0, init_stddev);
 }
 
+void FM::sgd(const F& bias_grad, const std::unordered_map<uint32_t, FM_weight>& grad_map)
+{
+  static thread_local FM_weight weight(N);
+
+  for (auto& [idx, val] : grad_map)
+  {
+    weights.find(idx, weight);
+    weight.w += (w_lr * val.w);
+    for (size_t j = 0; j < N; j += 8)
+    {
+      __m256 v = _mm256_loadu_ps(weight.v.data() + j);
+      __m256 g = _mm256_loadu_ps(val.v.data() + j);
+      v        = _mm256_add_ps(v, _mm256_mul_ps(_mm256_set1_ps(v_lr), g));
+      _mm256_storeu_ps(weight.v.data() + j, v);
+    }
+    weights.insert_or_assign(idx, weight);
+  }
+
+  bias += (w_lr * bias_grad);
+}
+
 void FM::learn(const std::vector<std::unique_ptr<Sample>>& sample_batch)
 {
   static thread_local std::unordered_map<uint32_t, FM_weight> grad_map;
   static thread_local FM_weight                               weight(N);
 
+  auto       size = (float)sample_batch.size();
   FM_weight* grad;
   F          bias_grad = 0;
   for (auto& sample : sample_batch)
@@ -113,7 +137,7 @@ void FM::learn(const std::vector<std::unique_ptr<Sample>>& sample_batch)
         }
         if (j == 0) [[unlikely]] // linear part
         {
-          grad->w += (t * xi - w_l2 * weight.w);
+          grad->w += (t * xi - w_l2 * weight.w) / size;
         }
         __m256 x   = _mm256_set1_ps(xi);
         __m256 tmp = _mm256_mul_ps(sum_of_vx, x);
@@ -122,31 +146,15 @@ void FM::learn(const std::vector<std::unique_ptr<Sample>>& sample_batch)
         x          = _mm256_mul_ps(x, v);
         x          = _mm256_sub_ps(tmp, x);
         x          = _mm256_mul_ps(x, _mm256_set1_ps(t));
+        x          = _mm256_sub_ps(x, _mm256_mul_ps(_mm256_set1_ps(v_l2), v));
         __m256 g   = _mm256_loadu_ps(grad->v.data() + j);
-        g          = _mm256_add_ps(g, x);
-        g          = _mm256_sub_ps(g, _mm256_mul_ps(_mm256_set1_ps(v_l2), v));
+        g          = _mm256_add_ps(g, _mm256_div_ps(x, _mm256_set1_ps(size)));
         _mm256_storeu_ps(grad->v.data() + j, g);
       }
     }
   }
-  auto size = (float)sample_batch.size();
-  {
-    for (auto& [idx, val] : grad_map)
-    {
-      weights.find(idx, weight);
-      weight.w += (w_lr * val.w / size);
-      for (size_t j = 0; j < N; j += 8)
-      {
-        __m256 v = _mm256_loadu_ps(weight.v.data() + j);
-        __m256 g = _mm256_loadu_ps(val.v.data() + j);
-        v        = _mm256_add_ps(v, _mm256_div_ps(_mm256_mul_ps(_mm256_set1_ps(v_lr), g),
-                                                  _mm256_set1_ps(size)));
-        _mm256_storeu_ps(weight.v.data() + j, v);
-      }
-      weights.insert_or_assign(idx, weight);
-    }
-  }
-  bias += (w_lr * bias_grad / size);
+
+  sgd(bias_grad, grad_map);
   grad_map.clear();
 }
 
