@@ -7,8 +7,6 @@
 #include <memory>
 #include <unistd.h>
 
-#include "fast_float/fast_float.h"
-
 #include "common.h"
 #include "sample.h"
 
@@ -32,8 +30,7 @@ class Parser
   long   offset     = 0;
   long   bytes_read = 0;
 
-  static uint32_t fast_atoi(char** pptr);
-  void            read_block();
+  void read_block();
 
  public:
   explicit Parser(const string& file_name);
@@ -41,8 +38,6 @@ class Parser
   ~Parser();
 
   void reset();
-
-  static unique_ptr<Sample> parseSample(unique_ptr<string> line);
 
   unique_ptr<string> nextLine();
 };
@@ -67,44 +62,6 @@ Parser::~Parser()
 {
   close(fd);
   delete buf;
-}
-
-// https://stackoverflow.com/questions/16826422/c-most-efficient-way-to-convert-string-to-int-faster-than-atoi
-uint32_t Parser::fast_atoi(char** pptr)
-{
-  char* p = *pptr;
-
-  uint32_t val = 0;
-  while (*p != ':')
-  {
-    val = val * 10 + (*(p++) - '0');
-  }
-
-  *pptr = p;
-  return val;
-}
-
-unique_ptr<Sample> Parser::parseSample(unique_ptr<string> line)
-{
-  if (line == nullptr) [[unlikely]]
-    return nullptr;
-
-  char* p = const_cast<char*>(line->c_str());
-
-  uint32_t y = (*p++) - '0';
-
-  unique_ptr<SampleX> x = make_unique<SampleX>();
-  F                   val;
-  do
-  {
-    p++;
-    uint32_t idx = fast_atoi(&p);
-
-    auto answer = fast_float::from_chars(p + 1, p + 100, val);
-    x->push_back(make_pair(idx, val));
-    p = const_cast<char*>(answer.ptr);
-  } while (*(p) != '\0');
-  return make_unique<Sample>(y, std::move(x));
 }
 
 void Parser::read_block()

@@ -37,7 +37,6 @@ struct Config
   uint32_t batch_size;
   uint32_t k;
   uint32_t train_thread_num;
-  uint32_t parse_thread_num;
   long     seed;
   bool     debug;
 
@@ -61,7 +60,6 @@ struct Config
     sprintf(ss + strlen(ss), "%*s: %u\n", padding, "batch_size", batch_size);
     sprintf(ss + strlen(ss), "%*s: %u\n", padding, "k", k);
     sprintf(ss + strlen(ss), "%*s: %u\n", padding, "train_thread_num", train_thread_num);
-    sprintf(ss + strlen(ss), "%*s: %u\n", padding, "parse_thread_num", parse_thread_num);
     sprintf(ss + strlen(ss), "%*s: %ld\n", padding, "seed", seed);
     sprintf(ss + strlen(ss), "%*s: %d\n", padding, "debug", debug);
 
@@ -69,8 +67,8 @@ struct Config
   }
 } cfg;
 
-void parse_thread(const int id, BlockingQueue<unique_ptr<vector<unique_ptr<string>>>>& line_queue,
-                  BlockingQueue<unique_ptr<vector<unique_ptr<Sample>>>>& sample_queue)
+void train_thread(const int id, Base* model,
+                  BlockingQueue<unique_ptr<vector<unique_ptr<string>>>>& line_queue)
 {
   while (true)
   {
@@ -80,33 +78,16 @@ void parse_thread(const int id, BlockingQueue<unique_ptr<vector<unique_ptr<strin
     {
       break;
     }
-    unique_ptr<vector<unique_ptr<Sample>>> samples = make_unique<vector<unique_ptr<Sample>>>();
-    samples->reserve(cfg.batch_size);
+    vector<unique_ptr<Sample>> samples;
+    samples.reserve(cfg.batch_size);
     for (auto& line : *lines)
     {
-      unique_ptr<Sample> sample = Parser::parseSample(std::move(line));
+      unique_ptr<Sample> sample = make_unique<Sample>(*line);
       if (cfg.debug) [[unlikely]]
         spdlog::debug("{}: SAMPLE\t {}", id, sample->to_string());
-      samples->push_back(std::move(sample));
+      samples.push_back(std::move(sample));
     }
-    sample_queue.push(std::move(samples));
-  }
-  if (cfg.debug)
-    spdlog::debug("parse thread {:4d} end", id);
-}
-
-void train_thread(const int id, Base* model,
-                  BlockingQueue<unique_ptr<vector<unique_ptr<Sample>>>>& sample_queue)
-{
-  while (true)
-  {
-    unique_ptr<vector<unique_ptr<Sample>>> samples;
-    sample_queue.pop(samples);
-    if (samples == nullptr) [[unlikely]]
-    {
-      break;
-    }
-    model->learn(*samples);
+    model->learn(samples);
   }
   if (cfg.debug)
     spdlog::debug("train thread {:4d} end", id);
@@ -157,21 +138,11 @@ int run()
       int n_sample = 0, step = 1000000;
 
       BlockingQueue<unique_ptr<vector<unique_ptr<string>>>> line_queue(100);
-      BlockingQueue<unique_ptr<vector<unique_ptr<Sample>>>> sample_queue(100);
-
-      vector<thread> parse_threads;
-      for (size_t i = 0; i < cfg.parse_thread_num; ++i)
-      {
-        parse_threads.emplace_back(parse_thread, i, ref(line_queue), ref(sample_queue));
-        stringstream ss;
-        ss << std::setfill('0') << std::setw(3) << "parse_" << i;
-        pthread_setname_np(parse_threads[i].native_handle(), ss.str().c_str());
-      }
 
       vector<thread> train_threads;
       for (size_t i = 0; i < cfg.train_thread_num; ++i)
       {
-        train_threads.emplace_back(train_thread, i, model, ref(sample_queue));
+        train_threads.emplace_back(train_thread, i, model, ref(line_queue));
         stringstream ss;
         ss << std::setfill('0') << std::setw(3) << "train_" << i;
         pthread_setname_np(train_threads[i].native_handle(), ss.str().c_str());
@@ -203,13 +174,8 @@ int run()
         line_queue.push(std::move(lines));
         lines = nullptr;
       }
-      for (size_t i = 0; i != cfg.parse_thread_num; ++i)
-        line_queue.push(nullptr);
-      for (auto& th : parse_threads)
-        if (th.joinable())
-          th.join();
       for (size_t i = 0; i != cfg.train_thread_num; ++i)
-        sample_queue.push(nullptr);
+        line_queue.push(nullptr);
       for (auto& th : train_threads)
         if (th.joinable())
           th.join();
@@ -228,8 +194,9 @@ int run()
         Parser      parser_valid(cfg.valid_file);
         vector<F>   y_pred;
         vector<int> y_true;
-        while (unique_ptr<Sample> sample = Parser::parseSample(parser_valid.nextLine()))
+        while (unique_ptr<string> line = parser_valid.nextLine())
         {
+          unique_ptr<Sample> sample = make_unique<Sample>(*line);
           F pred = model->predict_prob(sample);
           y_pred.emplace_back(pred);
           y_true.emplace_back(sample->y);
@@ -270,8 +237,9 @@ int run()
     Parser   parser_test(cfg.test_file);
     ofstream ofs;
     ofs.open(cfg.test_pred_file, ofstream::out);
-    while (unique_ptr<Sample> sample = Parser::parseSample(parser_test.nextLine()))
+    while (unique_ptr<string> line = parser_test.nextLine())
     {
+      unique_ptr<Sample> sample = make_unique<Sample>(*line);
       F pred = model->predict_prob(sample);
       ofs << pred << endl;
     }
@@ -290,9 +258,9 @@ int check_args()
     cerr << "model must be lr or fm\n";
     return -1;
   }
-  if (cfg.seed != -1 && !(cfg.train_thread_num == 1 && cfg.parse_thread_num == 1))
+  if (cfg.seed != -1 && !(cfg.train_thread_num == 1))
   {
-    cerr << "random seed should be used with 1 train_thread and 1 parse_thread\n";
+    cerr << "random seed should be used with 1 train_thread\n";
     return -1;
   }
   return 0;
@@ -338,9 +306,7 @@ int main(int argc, char* argv[])
                      cxxopts::value<uint32_t>()->default_value("4"), "");
   options.add_option(group, "", "tt", "train thread num",
                      cxxopts::value<uint32_t>()->default_value("10"), "");
-  options.add_option(group, "", "pt", "parse thread num",
-                     cxxopts::value<uint32_t>()->default_value("3"), "");
-  options.add_option(group, "", "seed", "random seed, use with 1 train_thread and 1 parse_thread， -1: no seed",
+  options.add_option(group, "", "seed", "random seed, use with 1 train_thread， -1: no seed",
                      cxxopts::value<long>()->default_value("-1"), "");
   options.add_option(group, "d", "debug", "debug",
                      cxxopts::value<bool>()->default_value("false"), "");
@@ -371,7 +337,6 @@ int main(int argc, char* argv[])
     cfg.batch_size       = args["batch_size"].as<uint32_t>();
     cfg.k                = args["factor"].as<uint32_t>();
     cfg.train_thread_num = args["tt"].as<uint32_t>();
-    cfg.parse_thread_num = args["pt"].as<uint32_t>();
     cfg.seed             = args["seed"].as<long>();
     cfg.debug            = args["debug"].as<bool>();
   } catch (cxxopts::exceptions::exception& exception)
