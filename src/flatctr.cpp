@@ -7,7 +7,7 @@
 #include "cxxopts.hpp"
 #include "spdlog/spdlog.h"
 
-#include "blocking_queue/blocking_queue.h"
+#include "worker/blocking_queue.h"
 #include "common.h"
 #include "dataset/parser.h"
 #include "metric.h"
@@ -70,6 +70,8 @@ struct Config
 void train_thread(const int id, Base* model,
                   BlockingQueue<unique_ptr<vector<unique_ptr<string>>>>& line_queue)
 {
+  vector<unique_ptr<Sample>> samples;
+  samples.reserve(cfg.batch_size);
   while (true)
   {
     unique_ptr<vector<unique_ptr<string>>> lines;
@@ -78,19 +80,29 @@ void train_thread(const int id, Base* model,
     {
       break;
     }
-    vector<unique_ptr<Sample>> samples;
-    samples.reserve(cfg.batch_size);
-    for (auto& line : *lines)
+    for (size_t i = 0; i < lines->size(); i++)
     {
-      unique_ptr<Sample> sample = make_unique<Sample>(*line);
+      unique_ptr<Sample> sample = make_unique<Sample>(*(lines->at(i)));
       if (cfg.debug) [[unlikely]]
         spdlog::debug("{}: SAMPLE\t {}", id, sample->to_string());
       samples.push_back(std::move(sample));
+      if (samples.size() == cfg.batch_size || i == lines->size() - 1)
+      {
+        model->learn(samples);
+        samples.clear();
+      }
     }
-    model->learn(samples);
   }
   if (cfg.debug)
     spdlog::debug("train thread {:4d} end", id);
+}
+
+size_t get_package_size(size_t batch_size)
+{
+  size_t package_size = batch_size;
+  while (package_size < 2048)
+    package_size *= 2;
+  return package_size;
 }
 
 int run()
@@ -137,29 +149,30 @@ int run()
       spdlog::info("******************************************************");
       int n_sample = 0, step = 1000000;
 
-      BlockingQueue<unique_ptr<vector<unique_ptr<string>>>> line_queue(100);
+      BlockingQueue<unique_ptr<vector<unique_ptr<string>>>> line_queue(cfg.train_thread_num * 2);
 
       vector<thread> train_threads;
       for (size_t i = 0; i < cfg.train_thread_num; ++i)
       {
         train_threads.emplace_back(train_thread, i, model, ref(line_queue));
         stringstream ss;
-        ss << std::setfill('0') << std::setw(3) << "train_" << i;
+        ss << "train_" << std::setfill('0') << std::setw(2) << i;
         pthread_setname_np(train_threads[i].native_handle(), ss.str().c_str());
       }
 
       Clock last = Time::now();
       parser_train.reset();
       unique_ptr<vector<unique_ptr<string>>> lines = make_unique<vector<unique_ptr<string>>>();
-      lines->reserve(cfg.batch_size);
+      size_t                                 package_size = get_package_size(cfg.batch_size);
+      lines->reserve(package_size);
       while (unique_ptr<string> line = parser_train.nextLine())
       {
         lines->push_back(std::move(line));
-        if (lines->size() == cfg.batch_size)
+        if (lines->size() == package_size)
         {
           line_queue.push(std::move(lines));
           lines = make_unique<vector<unique_ptr<string>>>();
-          lines->reserve(cfg.batch_size);
+          lines->reserve(package_size);
         }
         n_sample++;
         if (n_sample % step == 0) [[unlikely]]
@@ -197,7 +210,7 @@ int run()
         while (unique_ptr<string> line = parser_valid.nextLine())
         {
           unique_ptr<Sample> sample = make_unique<Sample>(*line);
-          F pred = model->predict_prob(sample);
+          F                  pred   = model->predict_prob(sample);
           y_pred.emplace_back(pred);
           y_true.emplace_back(sample->y);
           if (cfg.debug)
@@ -240,7 +253,7 @@ int run()
     while (unique_ptr<string> line = parser_test.nextLine())
     {
       unique_ptr<Sample> sample = make_unique<Sample>(*line);
-      F pred = model->predict_prob(sample);
+      F                  pred   = model->predict_prob(sample);
       ofs << pred << endl;
     }
     ofs.close();
@@ -308,8 +321,8 @@ int main(int argc, char* argv[])
                      cxxopts::value<uint32_t>()->default_value("10"), "");
   options.add_option(group, "", "seed", "random seed, use with 1 train_thread， -1: no seed",
                      cxxopts::value<long>()->default_value("-1"), "");
-  options.add_option(group, "d", "debug", "debug",
-                     cxxopts::value<bool>()->default_value("false"), "");
+  options.add_option(group, "d", "debug", "debug", cxxopts::value<bool>()->default_value("false"),
+                     "");
   options.add_options()("h,help", "printing this help message");
 
   try
