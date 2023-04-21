@@ -14,6 +14,11 @@ set(CMAKE_CXX_FLAGS "-Wall -Wextra -march=native")
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
+option(STATIC_LINK "Link executable statically. Off by default." OFF)
+if(STATIC_LINK)
+    set(BUILD_SHARED_LIBS OFF)
+    set(CMAKE_EXE_LINKER_FLAGS "-static")
+endif()
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/src/deps/cxxopts)
 add_subdirectory(${PROJECT_SOURCE_DIR}/src/deps/fast_float)

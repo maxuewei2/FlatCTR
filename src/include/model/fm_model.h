@@ -216,21 +216,22 @@ F FM::predict_prob(const std::unique_ptr<Sample>& sample, bool training)
 #define check_line(line, tokens, n)                                                                \
   if (tokens.size() != (n))                                                                        \
   {                                                                                                \
-    spdlog::error("model parse error. line: [{}] token_size: [{}]", line, tokens.size());          \
+    spdlog::error("model parse error. @token, line: [{}] token_size: [{}]", line, tokens.size());  \
     return 0;                                                                                      \
   }
 #define parse_idx(line, p, idx)                                                                    \
+  errno = 0;                                                                                       \
   idx = strtol(p, &endptr, 10);                                                                    \
   if (errno != 0)                                                                                  \
   {                                                                                                \
-    spdlog::error("model parse error. line: [{}]", line);                                          \
+    spdlog::error("model parse error. @idx,   line: [{}], p: [{}]", line, p);                      \
     return 0;                                                                                      \
   }
 #define parse_val(line, p, val)                                                                    \
   answer = fast_float::from_chars(p, (p) + 100, val);                                              \
   if (answer.ec != std::errc())                                                                    \
   {                                                                                                \
-    spdlog::error("model parse error. line: [{}]", line);                                          \
+    spdlog::error("model parse error. @val    line: [{}], p: [{}]", line, p);                      \
     return 0;                                                                                      \
   }
 inline bool next_tokens(std::ifstream& ifs, std::string& line, std::vector<std::string>& tokens)
@@ -256,7 +257,7 @@ size_t FM::load(const std::string& fname)
   check_line(line, tokens, 2);
   if (tokens[0] != "k")
   {
-    spdlog::error("model parse error.");
+    spdlog::error("model parse error. @k");
     return 0;
   }
   parse_idx(line, tokens[1].c_str(), N);
@@ -265,7 +266,7 @@ size_t FM::load(const std::string& fname)
   check_line(line, tokens, 2);
   if (tokens[0] != "bias")
   {
-    spdlog::error("model parse error.");
+    spdlog::error("model parse error. @bias");
     return 0;
   }
   parse_val(line, tokens[1].c_str(), bias);
