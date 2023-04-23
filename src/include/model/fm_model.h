@@ -193,8 +193,7 @@ F FM::predict_prob(const std::unique_ptr<Sample>& sample, bool training)
     for (auto& [i, xi] : *(sample->x))
     {
       if (!weights.find(i, weight))
-        if (!training)
-          continue;
+        continue;
       __m256 v      = _mm256_loadu_ps(weight.v.data() + j);
       __m256 x      = _mm256_set1_ps(xi);
       v             = _mm256_mul_ps(v, x);
@@ -204,11 +203,11 @@ F FM::predict_prob(const std::unique_ptr<Sample>& sample, bool training)
     sum = _mm256_sub_ps(_mm256_mul_ps(sum, sum), sum_of_square);
     res = _mm256_add_ps(res, sum);
   }
-  res = _mm256_hadd_ps(res, res);
-  res = _mm256_hadd_ps(res, res);
-  res = _mm256_hadd_ps(res, res);
   _mm256_storeu_ps(weight.v.data(), res);
-  p += (0.5f * weight.v[0]);
+  for (size_t j = 0; j < 8; j++)
+  {
+    p += (0.5f * weight.v[j]);
+  }
   p = sigmoid(p);
   return p;
 }

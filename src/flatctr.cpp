@@ -141,6 +141,7 @@ int run()
   /*********************************************************
   *  training                                              *
   *********************************************************/
+  if (!cfg.train_file.empty())
   {
     Parser parser_train(cfg.train_file);
     for (size_t epoch_i = 0; epoch_i < cfg.epoch; epoch_i++)
